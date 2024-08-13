@@ -1,0 +1,1 @@
+This project focused on the analysis of data from a study using Logistic Regression for predictive modelling and tested concepts such as model building with confounders and model evaluation. It required an exploratory analysis of the data as well as a full interpretation and discussion of the results.
