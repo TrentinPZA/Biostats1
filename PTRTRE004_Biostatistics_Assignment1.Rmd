@@ -1,0 +1,739 @@
+---
+output:
+  pdf_document:
+    latex_engine: xelatex
+classoption: notitlepage
+header-includes:
+  - "\\usepackage{graphicx}"
+---
+
+\begin{titlepage}
+    \centering
+    \vspace*{2cm}
+    \includegraphics[width=0.6\textwidth]{UCT_Logo.jpg}\par
+    \vspace{1cm}
+    {\LARGE\bfseries Biostatistics, Assignment 1\par}
+    \vspace{0.5cm}  
+    \hrule  % 
+    \vspace{0.5cm}  
+    {\Large Petersen Trentin (PTRTRE004)
+    \par}
+    \vfill
+    {\large \today\par}
+\end{titlepage}
+
+```{r setup, include=FALSE,warning=FALSE,message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(caret)
+library(ROCR)
+library(knitr)
+library(MASS)
+library(ResourceSelection)
+library(epiR)
+```
+
+# Introduction
+
+Cardiovascular health is always a great concern and with the numerous different ways there are to put your cardiovascular health at risk, it necessitates the need for methods of diagnosing cardiovascular related diseases and defects that might put one at risk of experiencing a cardiac event. Stress echocardiography is a method of determining how well the heart is functions under stress.
+
+Traditionally to put the heart under stress the patient does some form of exercise to raise their heart rate, however this could pose risks to older patients whose hearts cannot endure the stress induced by physical exertion. An alternative method of inducing stress on the heart is through the use of the drug, Dobutamine. The aim of the research is to evaluate the predictive performance of a stress echocardiography test at predicting a cardiac event if Dobutamine was used to induce stress on the heart.
+
+The data was derived from a study that compared the predictive performance of a stress echocardiography test at predicting a cardiac event with different methods (Dobutamine vs exercise) of inducing stress on the heart. This subset only includes data about the cases where dobutamine was used to induce stress on the heart. There are 558 observations in the data, of which 350 will be used as training data and the remaning 208 observations will be used as validation data. The data included the following variables:
+
+\begin{itemize}
+  \item Cardiac event experienced in the following 12 months (0=no, 1=yes): $event$ (response)
+  \item Patient's age in years: $age$
+  \item Baseline Cardiac Ejection Fraction: $baseef$
+  \item Cardiac Ejection Fraction on Dobutamine: $dobef$
+  \item Was the Stress Echocardiography test positive (0=yes, 1=no): $posse$
+  \item Was there a Wall Motion Anomaly detected on the echocardiogram (0=yes, 1=no): $restwma$
+\end{itemize}
+
+For ease of interpretation, the binary representations for the $posse$ and $restwma$ variables were changed from (0=yes, 1=no) to (1=yes, 0=no) such that they use the same encoding as the response variable, $event$.
+
+# Statistical Methods
+
+Data Exploration: In the data exploration both univariate analyses and bivariate analyses were conducted. The univariate analyses was conducted to understand each variables distribution and basic statistics such as the mean, median and standard deviation. The bivariate analyses focus on the relationships between pairs of independent variables. Age as a confounder was also explored.
+
+Logistic Regression: The dependent variable $event$ is a binary variable and therefore we use logistic regression to map a linear combination of predictor variables to a probability of $event$ occurring which is then encoded into a 1 or a 0 depending on the decision rule/classification scheme.
+
+Model Building: A backwards approach was taken to build the logistic regression model to find the optimal model for the training data.
+
+Model Diagnostics: A thorough diagnostic analysis of the final model was conducted to ensure goodness of fit and that there aren't any highly influential points distorting the values of the regression coefficient estimates. This step is crucial for ensuring that the model is reliable and robust.
+
+Model Interpretation: A summary of the final model and its regression coefficient estimates were given as well as interpretations for each regression coefficient estimate. The interpretation allows for understanding of the underlying relationships in the data which can be used to inform clinical decisions.
+
+Classification Scheme Derivation: The final logistic regression model was used to determine a classification scheme that aligned with the context of the problem at hand. The final results for the Sensitivity, Specificity and Likelihood ratios are also provided as a measure of the final model + classification schemes performance.
+
+# Data Exploration
+
+
+```{r,echo=FALSE,warning=FALSE}
+#which(rownames(data)==355) Gives the row number(14) that corresponds to the case number (355)
+
+load("Assign1Data.RData")
+
+Assign1Data$restwma <- ifelse(Assign1Data$restwma==0,1,0)
+Assign1Data$posse <- ifelse(Assign1Data$posse==0,1,0)
+Assign1Data$restwma<-as.factor(Assign1Data$restwma)
+Assign1Data$posse<-as.factor(Assign1Data$posse)
+Assign1Data$event<-as.factor(Assign1Data$event)
+
+set.seed(123)
+sample.index <- sample(1:558, size = 350, replace = F)
+train_data <- Assign1Data[sample.index,]
+
+val_data <- Assign1Data[-sample.index,]
+
+```
+
+
+## Univariate Analyses
+
+To begin the data exploration, a table of descriptive statistics for the continuous variables: $age$, $baseef$ and $dobef$ was created. These statistics are displayed in Table 1. below.
+
+```{r,echo=FALSE,warning=FALSE}
+#Univariate analysis of age, dobef,baseef
+age5ns <- c(summary(train_data$age))
+baseef5ns <- c(summary(train_data$baseef))
+dobef5ns <- c(summary(train_data$dobef))
+
+nsTable<- cbind(t(cbind(age5ns,baseef5ns,dobef5ns)),c(sd(train_data$age),sd(train_data$baseef),sd(train_data$dobef)))
+nsTable<- cbind(nsTable,nsTable[,6]-nsTable[,1])
+colnames(nsTable) <- c("Min", "1st Qu.", "Median", "Mean", "3rd Qu.", "Max","Standard Deviation","Range")
+rownames(nsTable) <- c("$age$", "$baseef$", "$dobef$")
+kable(round(nsTable,3),caption = "Summary statistics for $age$, $baseef$ and $dobef$ variables")
+```
+
+
+```{r,echo=FALSE,warning=FALSE,fig.height=4}
+#Graphic Univariate analysis of age,baseef and dobef
+par(mfrow=c(1,2), cex.main=0.8, cex.sub=0.7, cex.axis=0.7, cex.lab=0.75)
+{boxplot(train_data$age,col="red",ylab="age (years)")
+  title(sub="Figure 1: Age Distribution")}
+{hist(train_data$age,main="",xlab="Age",col="lightblue")
+  abline(v=mean(train_data$age),col="green",lwd=2)
+  abline(v=quantile(train_data$age,probs = 0.5),col="orange",lwd=2)
+  legend("topleft", 
+       legend = c("Mean", "Median"),
+       fill = c("green", "orange"),
+       cex = 0.8)
+  title(sub="Figure 2: Distribution of Ages")}
+
+
+
+```
+
+### $age$:
+ 
+In the training data the minimum and maximum $age$ over all cases was 26 and 93 respectively. The interquartile range was $15.75$, which tells us that $50\%$ of the cases in the training data are spread over $15.75$ years of age, from $59.25$ years of age (1st Qu.) to $75$ years of age (3rd Qu.). Although the range is $67$ which might indicate there is a good spread of ages, the values of the first and third quartiles show us that majority of cases in the study are observations of elder people. The standard deviation of ages is $12.46$ years, therefore more than $50\%$ of the data is contained within one standard deviation from both the mean and the meadian. There are also some outliers as indicated by Figure 1.
+
+The mean $age$ of $67$ is fairly close to the median $age$ of $68$ which suggests that the distribution of the $age$ variable is fairly symmetric around the center. If we look at the histogram of ages depicted in Figure 2. we can see that the ages are approximately normally distributed but slightly skewed to the left.
+
+```{r,echo=FALSE,warning=FALSE,fig.height=4}
+par(mfrow=c(1,2), cex.main=0.8, cex.sub=0.7, cex.axis=0.7, cex.lab=0.75)
+{boxplot(train_data$baseef,col="green",ylab="baseef (%)")
+  title(sub="Figure 3: Baseline EF")}
+{hist(train_data$baseef,main="",xlab="BaseEF",col="lightblue")
+  abline(v=mean(train_data$baseef),col="green",lwd=2)
+  abline(v=quantile(train_data$baseef,probs = 0.5),col="orange",lwd=2)
+  legend("topleft", 
+       legend = c("Mean", "Median"),
+       fill = c("green", "orange"),
+       cex = 0.8)
+  title(sub="Figure 4: Distribution of baseeF Values",cex=0.5)}
+
+```
+
+
+### $baseef$:
+
+The minimum and maximum $baseef$ measurements over all the cases in the training data were $20\%$ and $79\%$ respectively. $25\%$ of the cases in the training data had a $baseef$ value of $53\%$ or lower as indicated by value of the 1st Quartile. $75\%$ of the cases had a $baseef$ value of $62\%$ or lower as indicated by the value of the 3rd Quartile. The standard deviation of the $baseef$ variable is $10.254\%$. 
+
+The mean $baseef$ was $55.9\%$ which close to the median value of $57\%$ and thus we can see in the histogram below that the distribution of $baseef$ values is very roughly symmetrical. The mean value of $55.9\%$ is on the lower end of normal heart function. With the a normal heart function being defined by a ejection fraction of $55\%$ to $70\%$. There are a number of reasons, most of which are common in older adults, which can lead to a decrease in $baseef$. Therefore we might be observing this fairly low mean $baseef$ value due to the distribution of ages in the data.
+
+```{r,echo=FALSE,warning=FALSE,fig.height=4}
+par(mfrow=c(1,2), cex.main=0.8, cex.sub=0.7, cex.axis=0.7, cex.lab=0.75)
+
+{boxplot(train_data$dobef,col="blue",ylab="dobeF (%)")
+  title(sub="Figure 5: EF on Dobutamine")}
+
+{hist(train_data$dobef,main="",xlab="DobEF",col="lightblue")
+  abline(v=mean(train_data$dobef),col="green",lwd=2)
+  abline(v=quantile(train_data$dobef,probs = 0.5),col="orange",lwd=2)
+  legend("topleft", 
+       legend = c("Mean", "Median"),
+       fill = c("green", "orange"),
+       cex = 0.8)
+  title(sub="Figure 6: Distribution of dobef Values",cex=0.5)}
+
+
+```
+
+### $dobef$:
+
+The minimum and maximum $dobef$ measurements over all the cases in the training data were $23\%$ and $94\%$ respectively. The 1st Quartile has a value of $63\%$, this means that a quarter of all the cases had a $dobef$ value of $63\%$ or below. Similarly the 3rd Quartile has a value of $74\%$ which indicates that $75\%$ of the cases have a $dobef$ value of $74\%$ or below.
+
+The mean $dobef$ value is $65.65\%$ which is close to the median value of $dobef$ which was $68\%$. The standard deviation of the $dobef$ variable is $11.631\%$.
+
+Figures 3&5. as well as Figures 4&6. show that the distributions of the $baseef$ and $dobef$ variables are very similar, however, the values of $dobef$ are higher than the $baseef$ values on average. Figures 3&5. also display a large number of outliers for both the $baseef$ and $dobef$, the effects of these outliers will be determined in the model diagnostics section.
+
+\newpage
+```{r,echo=FALSE,warning=FALSE}
+#Univariate anaylsis of posse and restwma
+cat_stats<-data.frame(
+  Yes = c(sum(train_data$posse==1),sum(train_data$restwma==1),sum(train_data$event==1)),
+  No = c(sum(train_data$posse==0),sum(train_data$restwma==0),sum(train_data$event==0)),
+  Yes_perc = round(c(sum(train_data$posse==1)/nrow(train_data),sum(train_data$restwma==1)/nrow(train_data),sum(train_data$event==1)/nrow(train_data)),3)*100,
+  No_perc = round(c(sum(train_data$posse==0)/nrow(train_data),sum(train_data$restwma==0)/nrow(train_data),sum(train_data$event==0)/nrow(train_data)),3)*100,
+  mode = c(ifelse(sum(train_data$posse==1)>sum(train_data$posse==0),"Yes (1)","No (0) "),ifelse(sum(train_data$restwma==1)>sum(train_data$restwma==0),"Yes (1)","No (0)"),ifelse(sum(train_data$event==1)>sum(train_data$event==0),"Yes (1)","No (0) "))
+)
+
+colnames(cat_stats)<-c("Frequency - Yes","Frequency - No","(%) - Yes","(%) - No","Mode")
+rownames(cat_stats)<-c("Stress Echocardiography was positive (posse)","Wall motion anamoly on echocardiogram (restwma)","Cardiac event was experienced (event)")
+kable(cat_stats,caption = "Summary statistics for Posse, Restwma and Event")
+```
+
+### $posse$:
+
+In $22.9\%$ of the cases the Stress Echocardiography test was positive i.e. $posse=1$ and in the other $77.1\%$ of the cases the Stress Echocardiography test was negative i.e. $posse=0$. The modal class was "No"-(0).
+
+### $restwma$:
+
+In $54.6\%$ of the cases, a wall motion anomaly was detected on the echocardiogram i.e. $restwma=1$ and in the other $45.4\%$ of the cases, no wall motion anomaly was detected on the echocardiogram i.e. $restwma=1$. The modal class was "Yes"-(1).
+
+### $event$:
+
+In $14.9\%$ of the cases, the patient experienced a cardiac event in the following 12 months i.e. $event=1$ and in the other $85.1\%$ of the cases, no cardiac event was experienced by the patient in the following 12 months. The modal class was "No"-(0).
+
+
+These statistics are shown graphically in Figures 7-9. below.
+
+```{r,echo=FALSE,fig.height=3,warning=FALSE}
+par(mfrow=c(1,3), cex.main=0.8, cex.sub=0.85, cex.axis=0.8, cex.lab=0.8)
+#Graphic Univariate anaylsis of posse and restwma
+{pie((c(sum(train_data$posse==0),sum(train_data$posse==1))),
+    main = "", 
+    col = c("blue","red"),  
+    labels = c("0","1"))
+  title(sub="Figure 7: posse Distribution ",cex=0.5)
+  legend("topright", 
+       legend = c("0", "1"),
+       fill = c("blue", "red"),
+       cex = 0.8)}
+
+{pie((c(sum(train_data$restwma==0),sum(train_data$restwma==1))),
+    main = "", 
+    col = c("lightblue","orange"),  
+    labels = c("0","1"))
+  title(sub="Figure 8: restwma Distribution",cex=0.5)
+  legend("topright", 
+       legend = c("0", "1"),
+       fill = c("lightblue", "orange"),
+       cex = 0.8)}
+
+{pie((c(sum(train_data$event==0),sum(train_data$event==1))),
+    main = "", 
+    col = c("green","yellow"),  
+    labels = c("0","1"))
+  title(sub="Figure 9: event Distribution",cex=0.5)
+  legend("topright", 
+       legend = c("0", "1"),
+       fill = c("green", "yellow"),
+       cex = 0.8)}
+```
+
+
+## Bivariate Analyses
+
+
+
+```{r,echo=FALSE,warning=FALSE}
+##Relationship between Baseef and Dobef
+par(cex.main=0.8, cex.sub=0.7, cex.axis=0.7, cex.lab=0.75)
+{plot(train_data$baseef,train_data$dobef,col="red",pch=19,ylab="dobef",xlab="baseef")
+  title(sub="Figure 10: dobeef vs baseef",cex=0.5)}
+
+dobef_baseef_cor<-round(cor(train_data$baseef,train_data$dobef),3)
+```
+
+### Relationship between $baseef$ and $dobef$:
+
+Figure 10 shows a strong positive linear relationship, $\rho=`r dobef_baseef_cor`$, between the $baseef$ and $dobef$ variables. As $baseef$ in creases so does $dobef$. This means that if both of these variables were to be included in the logistic regression model that there would be multicollinearity. Multicollinearity poses problems in model fitting as it can lead to misrepresentation of the regression coefficient estimates, making them unreliable and difficult to interpret.
+
+When multicollinearity is present it is common practice to either simply remove one of the correlated predictors from the model if it is sensible to do so in the context of the problem, or one could use is regularization (either L1 or L2 or a combination of the two, an elastic-net) to mitigate the effect of multicollinearity.
+
+The clinical interpretation of this relationship would be that a patients baseline cardiac ejection fraction is predictive of how their  ejection fraction will change due to the use of dobutamine. 
+
+
+
+```{r,echo=FALSE,warning=FALSE}
+#Relationship between event and baseef,dobef
+par(mfrow=c(1,2), cex.main=0.8, cex.sub=0.7, cex.axis=0.7, cex.lab=0.75)
+{boxplot(train_data$baseef~train_data$event,xlab = "Event (Yes=1) (No=0)",ylab = "baseef",col="red")
+ title(sub="Figure 11: baseef vs event",cex=0.5) }
+{boxplot(train_data$dobef~train_data$event,xlab = "Event (Yes=1) (No=0)",ylab = "dobef",col="orange")
+  title(sub="Figure 12: dobeef vs event",cex=0.5)}
+```
+
+### Relationship between $baseef$, $dobef$ and the $event$ outcome:
+
+Figure 11 shows the distribution of $baseef$ for patients, grouped by whether or not they experienced a cardiac event within the following 12 months. Patients who didn't experience a cardiac event ($event=0$) have a smaller spread of $baseef$ values around the median, meaning less variability of $baseef$ values. Patients where $event=1$ had a distribution with higher interquartile range (IQR) and thus variability of $baseef$ values. The median value of $baseef$ was higher amongst the group of patients where $event=0$ than the group of patients where $event=1$. The depicted distribution suggest that there is a possible link between lower $baseef$ values and a higher risk of experiencing a cardiac event in the following 12 months. The opposite applies for higher $baseef$ values.
+
+Figure 12 shows the distribution of $dobef$ for patients, grouped by whether or not they experienced a cardiac event within the following 12 months. The distributions look very similar to those in Figure 11, which is not unexpected due to the relationship between $dobef$ and $baseef$ explored previously. Therefore we can make the same observations, there is a possibility that lower $dobef$ values are linked with a higher risk of experiencing a cardiac event in the following 12 months and vice versa. This aligns with the clinical aspect as a lower ejection fraction indicates that the heart is not functioning as well as it should therefore compromising the health of the heart which could lead to a cardiac event.
+
+
+These relationships will be further explored in the model fitting section where logistic regression will be used to determine whether the effects of the $baseef$ and $dobef$ variables on the response is statistically significant.
+
+
+
+```{r,echo=FALSE,warning=FALSE}
+#Age as confounder evidence
+par(cex.main=0.8, cex.sub=0.7, cex.axis=0.7, cex.lab=0.75)
+{boxplot(train_data$age~train_data$event,xlab = "Event (Yes=1) (No=0)",ylab = "age",col="purple")
+ title(sub="Figure 13: age vs event",cex=0.5) }
+```
+
+### Relationship between $age$ and the $event$ outcome:
+
+Figure 13 shows the distribution of $age$ for patients, grouped by whether or not they experienced a cardiac event within the following 12 months. The boxplot shows that the median $age$ value in both the group of patients where $event=1$ and where $event=0$ is nearly identical. The IQR, representing the middle 50% of the data, is larger for the group of patients where $event=0$, suggesting greater variability of $age$ in this group.
+
+These distributions suggest that there is a probability that the outcome of $event$ is not strongly associated with $age$, however, this may be linked to the distribution of ages in the cases as $50\%$ of patients were in the age range $59$ to $75$. This concentration of older patients could make the relationship between the age of the patient and the occurrence of a cardiac event difficult to interpret/observe, as there is less variability in age among the younger patients (because there are fewer of them). The effect of age on the occurence of a cardiac event will be further investigated in the model fitting section.
+
+\newpage
+```{r,echo=FALSE,warning=FALSE}
+par(cex.main=0.8, cex.sub=0.7, cex.axis=0.7, cex.lab=0.75)
+{boxplot(train_data$age~train_data$restwma,xlab = "Restwma (Yes=1) (No=0)",ylab = "age",col="lightgreen")
+  title(sub="Figure 14: age vs restwma",cex=0.5)}
+```
+
+### $age$ as a confounder:
+
+For age to be a confounder it has to be associated with the outcome ($event$) as well as the exposure ($baseef$,$dobef$,$posse$,$restwma$), but it should not be a consequence of the exposure.
+
+Clinically it makes sense that age would be associated with the probability of having a cardiac event. However Figure 13 suggests that there may be very little/no association between age and the event. The same reasoning can be used as mentioned before, the skewed distribution of $age$ is distorting the true association between $age$ and $event$. Therefore, we will conclude that $age$ is associated with $event$ based on clinical evidence.
+
+Then we examine the association between age and if a wall motion anomaly was detected on the echocardiogram as clinically it is sound to say that wall motion anomalies are more common in older individuals. However, the distribution shown in Figure 14 looks much like the distribution in Figure 13 which we will conclude happens for the same reason as with the association between $age$ and $event$.
+
+Finally, $age$ is not a consequence of having a certain value of $baseef$ or $dobef$, therefore it is not a consequence of the exposure.
+
+$age$ will be treated as a confounder and any possible interactions it has with other variables will be explored.
+\newpage
+
+### Relationship between $event$ and $posse$:
+
+The relationship between $posse$ and $event$ was examined by creating a contingency table and calculating the odds and risk ratios.
+
+```{r,echo=FALSE,warning=FALSE}
+#Relationship between event and posse 
+posse_table <- matrix(c(
+length(c((which(train_data$posse==1 & train_data$event==1)))),
+length(c((which(train_data$posse==1 & train_data$event==0)))),
+length(c((which(train_data$posse==0 & train_data$event==1)))),
+length(c((which(train_data$posse==0 & train_data$event==0))))),2,2,T)
+epi_posse <- epi.2by2(posse_table, method = "cohort.count")
+
+rownames(posse_table) <- c("posse=1","posse=0")
+colnames(posse_table) <- c("event=1","event=0")
+kable(posse_table,caption = "Contingency table for $posse$ and $event$")
+```
+
+Risk Ratio $=2.48$ with a 95% CI ($1.52;4.04$). In the group of patients where the stress echocardiography test was positive, $posse=1$, the risk of experiencing a cardiac event in the following 12 months was $2.48$ times higher than in the group of patients where the stress echocardiography test was negative,$posse=0$.
+
+Odds Ratio $=3.03$ with a 95% CI ($1.63;5.64$). The effect of the stress echocardiography test being positive on the odds of experiencing a cardiac event in the following 12 months is $3.03$. In other words, those whose stress echocardiography tests' are positive have an odds of having a cardiac event in the following 12 months that is $3.03$ times the odds of those whose tests were negative.
+
+These ratios (and the fact that their CI's don't include 1) indicate a statistically significant relationship between the predictor $posse$ and the response $event$
+
+
+
+### Relationship between $event$ and $restwma$:
+
+Similarly to $posse$, the relationship between $restwma$ and $event$ was examined by creating a contingency table and calculating the odds and risk ratios.
+
+```{r,echo=FALSE,warning=FALSE}
+#Relationship between event and restwma
+restwma_table <- matrix(c(
+length(c((which(train_data$restwma==1 & train_data$event==1)))),
+length(c((which(train_data$restwma==1 & train_data$event==0)))),
+length(c((which(train_data$restwma==0 & train_data$event==1)))),
+length(c((which(train_data$restwma==0 & train_data$event==0))))),2,2,T)
+epi_restwma <- epi.2by2(restwma_table, method = "cohort.count")
+
+rownames(restwma_table) <- c("restwma=1","restwma=0")
+colnames(restwma_table) <- c("event=1","event=0")
+kable(restwma_table,caption = "Contingency table for $restwma$ and $event$")
+```
+
+Risk Ratio $=2.77$ with a 95% CI ($1.51;5.11$). In the group of patients where a wall motion anomaly was detected, $restwma=1$, the risk of experiencing a cardiac event in the following 12 months was $2.77$ times higher than in the group of patients where no wall motion anomaly was detected, $restwma=0$.
+
+Odds Ratio $=3.25$ with a 95% CI ($1.64;6.43$). The effect of having detected a wall motion anomaly, $restwma=1$, on the odds of experiencing a cardiac event in the following 12 months is $3.25$. In other words, patients where a wall motion anomaly was detected in their echocardiogram have an odds of having a cardiac event in the following 12 months that is $3.25$ times the odds of patients where no wall motion anomaly was detected in their echocardiogram.
+
+These ratios (and the fact that their CI's don't include 1) indicate a statistically significant relationship between the predictor $restwma$ and the response $event$.
+\newpage
+
+# Logistic Regression
+
+## Model Building:
+
+A backwards approach was selected to build the logistic regression model. 
+
+Step 1 is to identify which predictors should be included in the saturated model from which we will then remove insignificant predictors. To do so, univariate models are fitted for each predictor. Their significances can be summarised by Table 5 below:
+```{r,echo=FALSE,warning=FALSE}
+####Model Building
+
+#Fitting all univariate models and keeping significant ones.
+
+model_age <- glm(event~age,family = binomial(),data=train_data[,-7]) #Not sig
+
+
+model_baseef <- glm(event~baseef,family = binomial(),data=train_data[,-7])#Sig
+
+
+model_dobef <- glm(event~dobef,family = binomial(),data=train_data[,-7])#Sig
+
+
+model_posse <- glm(event~posse,family = binomial(),data=train_data[,-7])#Sig
+
+
+model_restwma <- glm(event~restwma,family = binomial(),data=train_data[,-7])#Sig
+
+
+step1_df <- data.frame(
+  Predictor <- c("$age$","$baseef$","$dobef$","$posse$","$restwma$"),
+  P_value <- c(summary(model_age)$coefficients[2,4],summary(model_baseef)$coefficients[2,4],summary(model_dobef)$coefficients[2,4],summary(model_posse)$coefficients[2,4],summary(model_restwma)$coefficients[2,4])
+)
+
+kable(step1_df,col.names = c("Predictor","P-Value"),caption = "Predictors and their significance when fitted in a univariate model")
+```
+
+Therefore for the initial saturated model, Model A, we will include all predictors but $age$ i.e. event ~ baseef+dobef+posse+restwma. 
+
+Thereafter, the process of selecting the best model (steps 2-5 of backwards approach) can then be summarised by Table 6 below:
+
+```{r,echo=FALSE,warning=FALSE}
+model_retained_risks <-glm(event~baseef+dobef+posse+restwma,family = binomial(),data=train_data[,-7]) #Only posse1 signif
+a_entry <- c("1","A","-","-","baseef+dobef+posse+restwma","","NA","NA",round(summary(model_retained_risks)$aic,3))
+
+model_baseef_removed <-glm(event~dobef+posse+restwma,family = binomial(),data=train_data[,-7]) #Removed baseef, highest p-val
+ano <- anova(model_baseef_removed,model_retained_risks,test="LRT")
+p_val <- ano$`Pr(>Chi)`[2]
+dev<- ano$Deviance[2]
+b_entry <- c("2","B","baseef","-","dobef+posse+restwma","",round(p_val,3),"vs A",round(summary(model_baseef_removed)$aic,3))
+
+model_restwma_removed <-glm(event~dobef+posse,family = binomial(),data=train_data[,-7]) #Removed restwma, highest p-val
+ano <- anova(model_restwma_removed,model_baseef_removed,test="LRT")
+p_val <- ano$`Pr(>Chi)`[2]
+dev<- ano$Deviance[2]
+c_entry <- c("3","C","restwma","-","dobef+posse","",round(p_val,3),"vs B",round(summary(model_restwma_removed)$aic,3))
+
+model_age_added <-glm(event~age+dobef+posse,family = binomial(),data=train_data[,-7]) #Added age back because its a confounder
+ano <- anova(model_restwma_removed,model_age_added,test="LRT")
+p_val <- ano$`Pr(>Chi)`[2]
+dev<- ano$Deviance[2]
+d_entry <- c("4","D","-","age","age+dobef+posse","",round(p_val,3),"vs C",round(summary(model_age_added)$aic,3))
+
+model_age_baseef_int <- glm(event~age*baseef+dobef+posse,family = binomial(),data=train_data[,-7]) #Added age*baseef interaction
+ano <- anova(model_age_baseef_int,model_age_added,test="LRT")
+p_val <- ano$`Pr(>Chi)`[2]
+dev<- ano$Deviance[2]
+e_entry <- c("5","E","-","age*baseef","age*baseef+dobef+posse","",round(p_val,3),"vs D",round(summary(model_age_baseef_int)$aic,3))
+
+model_age_dobef_int <- glm(event~age*dobef+posse,family = binomial(),data=train_data[,-7]) #Added age*dobef interaction
+ano <- anova(model_age_dobef_int,model_age_added,test="LRT")
+p_val <- ano$`Pr(>Chi)`[2]
+dev<- ano$Deviance[2]
+f_entry <- c("6","F","age*baseef","age*dobef","age*dobef+posse","",round(p_val,3),"vs D",round(summary(model_age_dobef_int)$aic,3))
+
+model_age_restwma_int <- glm(event~age*restwma+dobef+posse,family = binomial(),data=train_data[,-7]) #Added age*dobef interaction
+ano <- anova(model_age_restwma_int,model_age_added,test="LRT")
+p_val <- ano$`Pr(>Chi)`[2]
+dev<- ano$Deviance[2]
+g_entry <- c("7","G","age*dobef","age*restwmwa","age*restwma+dobef+posse","",round(p_val,3),"vs D",round(summary(model_age_restwma_int)$aic,3))
+
+model_age_posse_int <- glm(event~age*posse+dobef,family = binomial(),data=train_data[,-7]) #Added age*dobef interaction
+
+ano <- anova(model_age_posse_int,model_age_added,test="LRT")
+p_val <- ano$`Pr(>Chi)`[2]
+dev<- ano$Deviance[2]
+h_entry <- c("8","H","age*restwmwa","age*posse","age*posse+dobef+posse","",round(p_val,3),"vs D",round(summary(model_age_posse_int)$aic,3))
+
+AICs <- cbind(c("model_age","model_baseef","model_dobef","model_posse","model_restwma","model_retained_risks","model_baseef_removed","model_restwma_removed","model_age_baseef_int","model_age_dobef_int","model_age_restwma_int","model_age_posse_int"),c(summary(model_age)$aic,summary(model_baseef)$aic,summary(model_dobef)$aic,summary(model_posse)$aic,summary(model_restwma)$aic,summary(model_retained_risks)$aic,summary(model_baseef_removed)$aic,summary(model_restwma_removed)$aic,summary(model_age_baseef_int)$aic,summary(model_age_dobef_int)$aic,summary(model_age_restwma_int)$aic,summary(model_age_posse_int)$aic))
+
+building_table <- rbind(a_entry,b_entry,c_entry,d_entry,e_entry,f_entry,g_entry,h_entry)
+colnames(building_table) <- c("Step","Model","Variable/s Removed","Variable/s Added","Current Variable/s in Model","","LRT P-value","LRT vs.","AIC")
+kable(building_table,row.names = FALSE,caption = "Backwards model building approach steps 2-5 summarised")
+
+
+model_final <- model_age_restwma_int
+```
+
+The steps above can be summarized as follows:
+\begin{enumerate}
+  \item A model with all the retained risk factors/variables is fitted, Model A.
+  \item Steps 2 and 3, the least significant variable is removed. After step 3 all our variables were significant.
+  \item Step 4, $age$ is added into the model as it needs to be adjusted for as it's a confounder.
+  \item Steps 5-8, interactions between age and the 4 other predictor variables are explored.
+  \item Model G is chosen.
+\end{enumerate}
+
+\newpage
+The final model that was chosen was \underline{Model G} for two reasons. Firstly it had the lowest AIC amongst all the models that included $age$. Secondly the likelihood ratio test between model G and model D produced a p-value of $0.067$, this means that there is sufficient evidence (at a significance level of $\alpha=0.07$) against the null hypothesis.
+
+The null hypothesis of a likelihood ratio test is that the additional predictors in the more complex model don't improve the models fit. Therefore we can reject the null hypothesis (at a significance level of $\alpha=0.07$) and conclude that Model G, the more complex model that includes the interaction term between $age$ and $restwma$ is a better fit to the model than Model D, the simpler model.
+
+The final model, \underline{Model G}, includes the following predictor variables and the response, $event$:
+\begin{itemize}
+  \item $age$ - Age of patient in years
+  \item $restwma$ - Wall motion anomaly on echocardiogram (1=yes, 0=no)
+  \item $dobef$ - Ejection fraction on dobutamine
+  \item $posse$ - Stress echocardiography test was positive (1=yes, 0=no)
+  \item $age:restwma$ - Interaction term between $age$ and $restwma$
+\end{itemize}
+
+
+All the included predictors are significant at a significance level of $\alpha=0.05$ as can be seen in the table of coefficients, Table 7, below:
+```{r,echo=FALSE,warning=FALSE}
+kable(round(summary(model_final)$coefficients,3),caption = "Final logistic regression model")
+lower_bounds <-round(exp(summary(model_final)$coefficients[,1]-1.96*summary(model_final)$coefficients[,2]),4)  
+upper_bounds <-round(exp(summary(model_final)$coefficients[,1]+1.96*summary(model_final)$coefficients[,2]),4)  
+```
+
+
+The final model, \underline{Model G}, can be expressed as follows:
+\[logit(p) = -3.39655+(0.05787*age)+(5.00355*restwma)-(0.04487*dobef)+(0.74868*posse)-(0.06693*age*restwma)\]
+
+\newpage
+
+## Model Interpretation
+When all predictor variables are set to 0 the odds of experiencing a cardiac event are $\exp(-3.397)=0.03$. The $95\%$ confidence interval for the intercept coefficient on the odds scale is: ($`r lower_bounds[1]`;`r upper_bounds[1]`$)
+
+The main effect of $age$ ($restwma=0$) can be interpreted as follows: whilst keeping everything else constant, a one unit increase in age will result in the odds of experiencing a cardiac event, changing by a factor of $\exp(0.05787)=1.06$ (this is the same as a $6\%$ increase in the odds of experiencing a cardiac event). The $95\%$ confidence interval for the $age$ coefficient on the odds scale is: ($`r lower_bounds[2]`;`r upper_bounds[2]`$)
+
+The interaction term $age:restwma$ ($0.05787-0.06693=-0.00906$) defines by how much the main effect of $age$ changes when a wall motion anomaly is detected $restwma=1$. The odds change by a factor of $\exp(-0.00906)=0.99$ (this is the same as a $1\%$ decrease in the odds). The $95\%$ confidence interval for the $age:restwma$ coefficient on the odds scale is: ($`r lower_bounds[6]`;`r upper_bounds[6]`$)
+
+The $restwma$ term can't be interpreted on its own due to the presence of the interaction term and setting $age=0$ doesn't make clinical sense.
+
+Holding everything else constant, a one unit increase in the $dobef$ value will result in the odds of experiencing a cardiac event changing by a factor of $\exp(-0.045)=0.96$ (this is the same as a $4\%$ decrease in the odds of experiencing a cardiac event). The $95\%$ confidence interval for the $dobef$ coefficient on the odds scale is: ($`r lower_bounds[4]`;`r upper_bounds[4]`$)
+
+Holding everything else constant, if $posse=1$ i.e. the stress echocardiography test was positive, the odds of experiencing a cardiac event will change by a factor of $\exp(0.749)=2.11$. The $95\%$ confidence interval for the $posse$ coefficient on the odds scale is: ($`r lower_bounds[5]`;`r upper_bounds[5]`$)
+
+
+
+
+## Model Diagnostics
+
+### Goodness-of-Fit test:
+
+```{r,echo=FALSE,warning=FALSE}
+#Goodness of fit test
+
+hoslem_final<-hoslem.test(as.numeric(as.character(train_data$event)),fitted(model_final),g=10)
+
+hoslem_df <- data.frame(
+  X_squared = round(c(hoslem_final$statistic),4),
+  df = c(hoslem_final$parameter),
+  p_value = round(c(hoslem_final$p.value),4)
+)
+colnames(hoslem_df) <- c("X-squared","DoF","P-value")
+rownames(hoslem_df) <- c("Model G")
+kable(hoslem_df,caption = "Hosmer-Lemeshow Test for overall model fit")
+```
+The overall goodness of fit of a model can be assessed by using a Hosmer-Lemeshow test. The null hypothesis of this test is that the model is a good fit to the data. The alternate hypothesis is that the model is not a good fit to the data.
+
+As can be seen in Table 8, when the Hosmer-Lemeshow test was applied to Model G it produced a p-value of $0.2316$, which indicates insufficient evidence against the null hypothesis and thus, it can be said that Model G is a good fit to the data. 
+\newpage
+
+### Form of the linear predictor:
+
+Firstly we can plot the deviance residuals against the linear predictor. This allows for us to examine the form of the linear predictor which we can use to determine whether the linear component of the model is adequate or not.
+
+```{r,echo=FALSE,warning=FALSE}
+#Checking the form of the linear predictor
+par(cex.main=0.8, cex.sub=0.7, cex.axis=0.7, cex.lab=0.8)
+{plot(residuals(model_final,type="deviance")~predict(model_final, type="link"),ylab="Deviance Residuals",xlab="Linear Predictor",col="orange",xlim=c(-6,1))
+  text(residuals(model_final,type="deviance")~predict(model_final, type="link"), labels = train_data$event, cex = 0.6, font = 2)
+  title(sub="Figure 15: Checking the form of the linear predictor",cex=0.5)}
+```
+
+Figure 15 exhibits a curvilinear band of points with positive deviance residuals for the observations in the data where $event=1$ and a second band of points with negative deviance residual values for observations in the data where $event=0$.
+
+This pattern is indicative of the chosen model behaving as expected: as the linear predictors increase, so do the predicted probabilities for $event=1$, resulting in smaller residuals for these cases. On the other hand, the absolute values of the residuals for cases where $event=0$ become larger with higher predictor values.
+
+\newpage
+
+### Outliers:
+
+To determine which observations in the data are classified as outliers, we can look for points for which the standardised residuals are $>|2|$. Outliers can be identified graphically as shown in the Figure 16. below by all the points which lie on or above the red line. Outliers can also be determined statistically by examining/manipulating the data.
+
+```{r,echo=FALSE,warning=FALSE}
+#Identifying outliers by finding obs with std residuals > 2
+par(cex.main=0.8, cex.sub=0.7, cex.axis=0.7, cex.lab=0.8)
+standardised_residuals <- residuals(model_final,type="deviance") /  sqrt(1-hatvalues(model_final))
+outliers <- which(standardised_residuals>abs(2))
+
+{plot(standardised_residuals,pch=19,ylab="Deviance Residuals")
+  abline(h=2,col="red",lwd=2)
+  title(sub="Figure 16: Identifying outliers",cex=0.5)}
+```
+
+Table 9 below shows the cases that were classified as outliers. It is shown that all of these cases were assigned low probabilities of experiencing a cardiac event in the following 12 months, $event=1$, yet the cases still experienced the event. The next step in the model diagnostics will be to check if any of these outlier cases are influential.
+
+```{r,echo=FALSE,warning=FALSE}
+fitted_probs <- predict(model_final, type="response")
+outlier_table<-cbind(train_data[outliers,-7],fitted_probs[outliers])
+outlier_table<-outlier_table[which(outlier_table$`fitted_probs[outliers]`<=0.1),]
+colnames(outlier_table)<-c("age","baseef","dobef","restwma","posse","event","probabilites")
+kable(outlier_table,caption = "Cases identified as outliers")
+```
+
+### Influential Points/Cases:
+
+To determine which cases are influential the following plot shown in Figures 17 and 18 can be used.
+```{r,echo=FALSE,warning=FALSE}
+par(mfrow=c(1,2), cex.main=0.8, cex.sub=0.7, cex.axis=0.7, cex.lab=0.8)
+#Influential points
+{plot(model_final, which = 5)
+  title(sub="Figure 17: Identifying influential points",cex=0.25)}
+
+#Getting cooks distance values and plotting them
+ck_vals <- cooks.distance(model_final)
+top3 <- order(ck_vals, decreasing = TRUE)[1:3]
+{plot(ck_vals, type = "h", main = "", ylab = "Cook's Distance", xlab = "Observation Index",ylim=c(0,(max(ck_vals)+0.01)))
+  text(x = top3, y = ck_vals[top3], labels = train_data[top3,7], pos = 3, cex = 0.6)
+   title(sub="Figure 18: Cook's Distances",cex=0.25)}
+
+#Determining max leverage
+levs <- hatvalues(model_final)
+case_no<-train_data[which(levs==max(levs)),7]
+
+```
+
+Figure 17 shows some of the cases that are clear outliers such as cases 489 and 155 however, neither of these cases nor any of the others depicted in the plot are influential. This can be concluded as none of Cook's distances for these cases are over the common threshold of 1 which identifies a point/case as influential (which is depicted by the dashed line in the top right corner of figure 17). A clearer depiction of the Cook's distances is shown in Figure 18.
+
+Figure 17 shows case $`r case_no`$ as having the maximum leverage with a value of $`r round(max(levs),3)`$, however the case is clearly not influential as shown in Figure 17.
+
+We will then observe the dfbeta values for the top 3 most influential cases which are tabulated as follows:
+```{r,echo=FALSE,warning=FALSE}
+
+dfbetas <- dfbeta(model_final)
+kable(dfbetas[c(266,115,59),],caption = "dfbeta values for the top 3 most influential cases")
+
+
+
+
+```
+
+The effects of the observation/case on the regression coefficient estimates (dfbetas) can be interpreted as follows:\newpage
+
+Case 489 has a relatively large influence on the $restwma$ and intercept coefficient estimate and the sign of the dfbeta value suggests that removing this case would increase the $restwma$ coefficient estimate and decrease the intercept coefficient estimate. Case 489's dfbeta values for the other regression coefficients are relatively small, suggesting that removing case 489 would have little to no significant effect on the coefficient estimate.
+
+Case 155 has a relatively large influence on the intercept and the sign of the dfbeta value suggests that removing case 155 would increase the intercept coefficient estimate. $restwma$'s coefficient estimate is also moderately influenced by case 155, removing case 155 would decrease $restwma$'s coefficient estimate. Case 155's influence on the other coefficient estimates is insignificant and removing case 155 would not change the estimates.
+
+The interpretation of case 25 is similar to that of case 155 with the difference being that the effect of removing case 25 has a larger effect on the intercept and $restwma$ coefficient estimates.
+
+
+
+After a thorough diagnostic analysis, including checks for the goodness of fit of the model, the form of the linear predictor, outliers and influential points, the model exhibits robust performance no significant deviations from what is expected in the diagnostics.
+
+The residuals behave as expected and display no patterns that suggest violations of the underlying assumptions. The influence diagnostics indicate that there are no individual cases significantly impact the model’s coefficients. 
+
+Overall, the diagnostic tests support the claim that the model is a good fit for the data, thus the next step to be taken is to derive a classification scheme.
+
+
+# Classification Scheme
+
+A logistic regression model can be used to predict the probability that the response, $event=1$. Therefore to transform these probabilities into a binary outcome we need to apply a classification scheme which makes use of a threshold that determines whether the prediction is encoded into a 1 or a 0. 
+
+For example, $\hat{p}>\pi_0$ then encoded with a 1 and if $\hat{p}<\pi_0$ then encoded with a 0. Changing $\pi_0$ can effect the accuracy, sensitivity, specificity, false postive rate, false negative rate and a number of other performance metrics. Unfortunately it is not as simple as finding the best $\pi_0$ value as there are crucial trade-offs such as: decreasing the threshold increases sensitivity but decreases specificity and vice versa.
+
+In the context of the problem that we are faced with, it might be more worthwhile to strive for higher sensitivity at the cost of lower specificity. 
+
+This can be argued as increased sensitivity means the models ability to detect positive cases is enhanced, which is vital in the case of prediciting cardiac events where the stakes are high. The trade-off involes an increase in false positives leading to situations where precautions might be taken unnecessarily. In the context of cardiac events missing a true positive could have far more severe repercussions than false alarms which might just involve in taking precautions against a cardiac event even though the prediction was a false positive.
+
+The pros and cons of higher sensitivity vs specificity can be debated eternally but ultimately it was chosen to slightly favour sensitivity over specificity in the context of this problem with the choice being driven by wanting to minimize the risk of overlooking a cardiac event.
+
+The decision on the value for the threshold, $\pi_0$ was, made based off the ROC curve depicted by Figure 19.
+
+```{r,echo=FALSE,warning=FALSE}
+#####Classification Scheme
+pred.obj <- prediction(fitted(model_final), labels = train_data$event)
+roc_curve <- performance(pred.obj,"tpr","fpr")
+
+cutoffs <- data.frame(
+  cut=roc_curve@alpha.values[[1]],
+  tpr=roc_curve@y.values[[1]],
+  spec = 1 - roc_curve@x.values[[1]],
+  fpr=roc_curve@x.values[[1]])
+cutoffs$youdins <- cutoffs$tpr+cutoffs$spec-1
+cutoffs$lr_plus <- cutoffs$tpr/cutoffs$fpr
+cutoffs$lr_minus <- (1-cutoffs$tpr)/cutoffs$spec
+cutoffs$mcr <- (cutoffs$fpr+(1-cutoffs$tpr))/(cutoffs$fpr+(1-cutoffs$tpr)+cutoffs$tpr+cutoffs$spec)
+
+
+pi_0 <- cutoffs[which(cutoffs$youdins==max(cutoffs$youdins)),1]
+same_sens <- cutoffs[which(cutoffs$tpr==cutoffs[which(cutoffs$cut==pi_0),2]),]
+pi_0 <- mean(same_sens$cut)
+par(cex.main=0.8, cex.sub=0.7, cex.axis=0.7, cex.lab=0.8)
+{plot(roc_curve)
+abline(a=0,b=1)
+segments(same_sens$fpr[1],same_sens$tpr[1],same_sens$fpr[nrow(same_sens)],same_sens$tpr[1],col = "red",lwd=2)
+points(mean(same_sens$fpr),same_sens$tpr[1],col="green",pch=19)
+points(same_sens$fpr[1],same_sens$tpr[1],pch=19)
+points(same_sens$fpr[nrow(same_sens)],same_sens$tpr[1],pch=19)
+
+segments(same_sens$fpr[1],same_sens$tpr[1],same_sens$fpr[1],same_sens$fpr[1],col = "blue",lwd=2,lty=2)
+text(same_sens$fpr[1]+0.15,y=0.5,labels="Youden's Index",col = "blue")
+text(same_sens$fpr[1],y=same_sens$tpr[1]+0.05,labels=round(same_sens$cut[1],3))
+text(same_sens$fpr[nrow(same_sens)],y=same_sens$tpr[1]+0.05,labels=round(same_sens$cut[nrow(same_sens)],3))
+text(mean(same_sens$fpr),y=same_sens$tpr[1]-0.05,labels=round(mean(same_sens$cut),3),col = "green")
+title(sub="Figure 19: ROC curve for the chosen model",cex=0.25)}
+```
+
+Initially the Youdin's index value was calculated for each threshold value on the ROC curve. The threshold value that produced the highest Youdin's Index value was used as a starting point, $\pi_0=0.181$. Youdin's index assumes that False Positives and False Negatives are equally desireable, which as mentioned before is not desired, we want slightly more false positves. 
+
+Therefore the threshold was selected as the mean of the thresholds that produced the same sensitivity (all the points on the red line) as the threshold that maximised the Youdin's index. The thinking behind this being that even though this minor change in threshold had no effect on the sensitivity in the training data, it may have an effect in the test data.
+
+The final threshold was chosen to be $\pi_0=0.155$ as depicted by the green point in Figure 19.
+
+```{r,echo=FALSE,warning=FALSE}
+#Testing model performance with classification scheme
+test_predictions <- predict(model_final,newdata = val_data,type="response")
+test_predictions <- ifelse(test_predictions>pi_0,1,0)
+confMatrix <- confusionMatrix(as.factor(test_predictions),val_data$event,positive = "1")
+# confMatrix
+final_table<-confMatrix$table
+final_sens <- confMatrix$byClass[1]
+final_spec <- confMatrix$byClass[2]
+final_accu <- confMatrix$overall[1]
+metrics_df<-data.frame(Metrics=c(final_sens,final_spec,final_accu))
+
+
+LR_plus<-round(as.numeric(final_sens/(1-final_spec)),3)
+LR_minus <- round(as.numeric((1-final_sens)/final_spec),3)
+seLR_plus <- sqrt((1/final_table[2,2])-(1/(final_table[2,2]+final_table[1,2]))+(1/final_table[2,1])-(1/(final_table[2,1]+final_table[1,1])))
+seLR_minus <- sqrt((1/final_table[1,2])-(1/(final_table[2,2]+final_table[1,2]))+(1/final_table[1,1])-(1/(final_table[2,1]+final_table[1,1])))
+CI_LRplus <- c(LR_plus,paste0(round(exp(log(LR_plus)-1.96*(seLR_plus)),3)," ; ",round(exp(log(LR_plus)+1.96*(seLR_plus)),3)))
+CI_LRminus <- c(LR_minus,paste0(round(exp(log(LR_minus)-1.96*(seLR_minus)),3)," ; ",round(exp(log(LR_minus)+1.96*(seLR_minus)),3)))
+LR_finals <- rbind(t(CI_LRplus),t(CI_LRminus))
+rownames(LR_finals)<-c("LR+","LR-")
+colnames(LR_finals)<-c("Likelihood Ratio Estimate","95% Confidence Interval")
+
+```
+
+The final model, \underline{Model G} and its classification threshold defined as:
+\[logit(p) = -3.39655+(0.05787*age)+(5.00355*restwma)-(0.04487*dobef)+(0.74868*posse)-(0.06693*age*restwma)\]
+\[\pi_0=0.155\]
+were then used to make predictions using the validation data set. This yielded the following results:
+```{r,echo=FALSE}
+kable(round(metrics_df,4),caption = "Final metrics from testing Model G on validation data")
+kable(LR_finals,caption = "Likelihood Ratio Estimates and their 95% CIs")
+```
+
+# Conclusions
+
+The logistic regression analysis identified $age$, $dobef$ (ejection fraction on dobutamine), $posse$ (stress echocardiography test result), $restwma$ (wall motion anomaly), and the interaction between $age$ and $restwma$ as significant predictors of a cardiac event within the following 12 months.
+
+From this we can provide a conclusion to the primary objective and state that the stress echocardiography test, when using dobutamine to induce stress, is effective in predicting cardiac events. Therefore Dobutamine could prove to be a reliable alternative to the traditional methods of raising a persons heart rate for the purpose of performing a stress echocardiography test which could expand the population of people for which the test is applicable.
+
+In order to truly compare the use of Dobutamine and exercise in inducing stress on the heart for a stress echocardiography test, a model would have to be built using data given on people who induced stress with exercise. The performance of Dobutamine could then be quantified through a comparison of the logistic model built using Dobutamine data and the logistic model built using exercise data.
+
